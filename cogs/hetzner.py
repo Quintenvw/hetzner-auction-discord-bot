@@ -1,5 +1,6 @@
 import discord
 from discord.app_commands import (
+    Choice,
     Range,
     command,
     describe,
@@ -10,7 +11,8 @@ from discord.ext import commands, tasks
 from discord.interactions import Interaction
 from discord.ui import Button
 from settings import settings
-from typing import Literal
+from typing import Literal, Optional
+from bson import ObjectId
 import asyncio
 import datetime
 
@@ -302,6 +304,95 @@ class Hetzner(commands.Cog, name="hetzner"):
             text="You can save up to 10 server configs. Each server config is valid for 90 days.",
         )
         await interaction.response.send_message(embed=embed)
+
+    def _config_label(self, config: dict) -> str:
+        """Build a human-readable label for a config document."""
+        parts = []
+        currency = config.get("currency", "EUR")
+        if price := config.get("price"):
+            vat = config.get("vat_percentage", 0)
+            parts.append(f"≤{price}{currency}" + (f"+{vat}%VAT" if vat else ""))
+        if loc := config.get("location"):
+            parts.append(loc)
+        if cpu := config.get("cpu"):
+            parts.append(cpu)
+        ram = config.get("ram_size")
+        ram_ecc = config.get("ram_ecc")
+        if ram or ram_ecc:
+            ram_str = f"{ram}GB" if ram else ""
+            ecc_str = "ECC" if ram_ecc else ""
+            parts.append(" ".join(filter(None, [ram_str, "RAM", ecc_str])))
+        hdd_size = config.get("hdd_size")
+        hdd_count = config.get("hdd_count")
+        hdd_type = config.get("hdd_type")
+        if hdd_size or hdd_count or hdd_type:
+            size_str = f"{hdd_size}GB" if hdd_size else ""
+            count_str = f"x{hdd_count}" if hdd_count else ""
+            type_str = hdd_type.upper() if hdd_type else ""
+            parts.append(" ".join(filter(None, [size_str, count_str, type_str])))
+        if not parts:
+            parts.append(f"Any {currency} server")
+        return " | ".join(parts)[:100]
+
+    @command(
+        name="hetzner_remove",
+        description="Remove a Hetzner server config.",
+    )
+    @guild_only()
+    @describe(
+        config="The config you want to remove. Leave empty to remove all configs."
+    )
+    @bot_has_permissions(
+        send_messages=True, embed_links=True, external_emojis=True, attach_files=True
+    )
+    @cooldown(1, 5, key=lambda i: (i.guild_id, i.user.id))
+    async def slash_hetzner_remove(
+        self, interaction: Interaction, config: Optional[str] = None
+    ):
+        """Remove your Hetzner server configs."""
+        assert interaction.guild is not None
+        assert interaction.user is not None
+        assert interaction.channel is not None
+
+        if config == "__all__" or config is None:
+            await self.bot.db.hetzner.delete_many({"user_id": interaction.user.id})
+            print(f"Removed all Hetzner configs for user {interaction.user.id}.")
+            await interaction.response.send_message(
+                "All your Hetzner server configs have been removed!"
+            )
+        else:                
+            del_embed = discord.Embed(
+                title="Config Removed!",
+                description=f"The following config has been removed:\n{self._config_label({'_id': config, **(await self.bot.db.hetzner.find_one({'_id': ObjectId(config)}))})}",
+                color=0xFF0000,
+            )
+                
+            result = await self.bot.db.hetzner.delete_one(
+                {"_id": ObjectId(config), "user_id": interaction.user.id}
+            )
+            if result.deleted_count == 0:
+                print(f"Config {config} not found for user {interaction.user.id}.")
+                await interaction.response.send_message(
+                    ":x: | Config not found!", ephemeral=True
+                )
+            else:
+                print(f"Removed Hetzner config {config} for user {interaction.user.id}.")
+                await interaction.response.send_message(
+                    embed = del_embed
+                )
+
+    @slash_hetzner_remove.autocomplete("config")
+    async def hetzner_remove_autocomplete(
+        self, interaction: Interaction, current: str
+    ) -> list[Choice[str]]:
+        configs = await self.bot.db.hetzner.find(
+            {"user_id": interaction.user.id}
+        ).to_list(length=10)
+        choices = [Choice(name="All configs", value="__all__")]
+        for cfg in configs:
+            label = self._config_label(cfg)
+            choices.append(Choice(name=label, value=str(cfg["_id"])))
+        return choices
 
     @check_auction.before_loop
     async def before_remove_files(self):
