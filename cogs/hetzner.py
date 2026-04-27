@@ -1,10 +1,10 @@
 import discord
 from discord.app_commands import (
+    AppCommandContext,
     Choice,
+    Group,
     Range,
-    command,
     describe,
-    guild_only,
 )
 from discord.app_commands.checks import bot_has_permissions, cooldown
 from discord.ext import commands, tasks
@@ -173,7 +173,8 @@ class Hetzner(commands.Cog, name="hetzner"):
                     name="RAM", value=f"{found_ram_size} GB ({found_ram_ecc})"
                 )
                 embed.add_field(
-                    name="Storage", value=f"{found_hdd_size} GB ({found_hdd_count} drives)"
+                    name="Storage",
+                    value=f"{found_hdd_size} GB ({found_hdd_count} drives)",
                 )
 
                 view = discord.ui.View()
@@ -205,8 +206,14 @@ class Hetzner(commands.Cog, name="hetzner"):
         )
         print("Deleted configs older than 90 days.")
 
-    @command(
+    hetzner = Group(
         name="hetzner",
+        description="Hetzner server auction commands.",
+        allowed_contexts=AppCommandContext(guild=True),
+    )
+
+    @hetzner.command(
+        name="add",
         description="Get notified when a server from Hetzner server auction reaches your set requirements.",
     )
     @describe(
@@ -221,12 +228,11 @@ class Hetzner(commands.Cog, name="hetzner"):
         drive_count="The minimum amount of drives",
         drive_type="Server needs at least one specific drive type (NVMe, SATA SSD, or HDD)",
     )
-    @guild_only()
     @bot_has_permissions(
         send_messages=True, embed_links=True, external_emojis=True, attach_files=True
     )
     @cooldown(1, 5, key=lambda i: (i.guild_id, i.user.id))
-    async def slash_hetzner(
+    async def slash_hetzner_add(
         self,
         interaction: Interaction,
         price: Range[int, 0, 500] = 0,
@@ -337,11 +343,10 @@ class Hetzner(commands.Cog, name="hetzner"):
             parts.append(f"Any {currency} server")
         return " | ".join(parts)[:100]
 
-    @command(
-        name="hetzner_remove",
+    @hetzner.command(
+        name="remove",
         description="Remove a Hetzner server config.",
     )
-    @guild_only()
     @describe(
         config="The config you want to remove. Leave empty to remove all configs."
     )
@@ -350,14 +355,14 @@ class Hetzner(commands.Cog, name="hetzner"):
     )
     @cooldown(1, 5, key=lambda i: (i.guild_id, i.user.id))
     async def slash_hetzner_remove(
-        self, interaction: Interaction, config: Optional[str] = None
+        self, interaction: Interaction, config: str
     ):
         """Remove your Hetzner server configs."""
         assert interaction.guild is not None
         assert interaction.user is not None
         assert interaction.channel is not None
 
-        if config == "__all__" or config is None:
+        if config == "__all__":
             await self.bot.db.hetzner.delete_many({"user_id": interaction.user.id})
             print(f"Removed all Hetzner configs for user {interaction.user.id}.")
             await interaction.response.send_message(
@@ -367,7 +372,9 @@ class Hetzner(commands.Cog, name="hetzner"):
             try:
                 oid = ObjectId(config)
             except InvalidId:
-                print(f"Invalid ObjectId supplied for removal: {config!r} by user {interaction.user.id}")
+                print(
+                    f"Invalid ObjectId supplied for removal: {config!r} by user {interaction.user.id}"
+                )
                 await interaction.response.send_message(
                     "Invalid config ID!", ephemeral=True
                 )
@@ -377,12 +384,16 @@ class Hetzner(commands.Cog, name="hetzner"):
                 {"_id": oid, "user_id": interaction.user.id}
             )
             if deleted_doc is None:
-                print(f"Config {config} not found or not owned by user {interaction.user.id}.")
+                print(
+                    f"Config {config} not found or not owned by user {interaction.user.id}."
+                )
                 await interaction.response.send_message(
                     "Config not found!", ephemeral=True
                 )
             else:
-                print(f"Removed Hetzner config {config} for user {interaction.user.id}.")
+                print(
+                    f"Removed Hetzner config {config} for user {interaction.user.id}."
+                )
                 del_embed = discord.Embed(
                     title="Config Removed!",
                     description=f"The following config has been removed:\n{self._config_label(deleted_doc)}",
