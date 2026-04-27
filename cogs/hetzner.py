@@ -11,7 +11,7 @@ from discord.ext import commands, tasks
 from discord.interactions import Interaction
 from discord.ui import Button
 from settings import settings
-from typing import Literal, Optional
+from typing import Literal
 from bson import ObjectId
 from bson.errors import InvalidId
 import asyncio
@@ -354,9 +354,7 @@ class Hetzner(commands.Cog, name="hetzner"):
         send_messages=True, embed_links=True, external_emojis=True, attach_files=True
     )
     @cooldown(1, 5, key=lambda i: (i.guild_id, i.user.id))
-    async def slash_hetzner_remove(
-        self, interaction: Interaction, config: str
-    ):
+    async def slash_hetzner_remove(self, interaction: Interaction, config: str):
         """Remove your Hetzner server configs."""
         assert interaction.guild is not None
         assert interaction.user is not None
